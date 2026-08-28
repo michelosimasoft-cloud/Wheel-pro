@@ -649,11 +649,11 @@ public partial class MainWindow : Window
             catch { virtualControllerBridge.Dispose(); return; }
         }
         var isT98 = selectedProfile.Model.Contains("T98", StringComparison.OrdinalIgnoreCase);
-        var l2Pressed = IsPhysicalButtonPressed("L2", state, 16);
         var r2Pressed = IsPhysicalButtonPressed("R2", state, isT98 ? 1u : 32u);
         // A wheel can use the physical L2/R2 buttons as secondary brake/throttle
         // while retaining analogue pedal travel for the primary controls.
-        virtualControllerBridge.Submit(steering, Math.Max(accelerator, r2Pressed ? 1 : 0), Math.Max(brake, l2Pressed ? 1 : 0), state.Pov, new Dictionary<string, bool>
+        var sharePressed = IsPhysicalButtonPressed("Share", state, 256);
+        virtualControllerBridge.Submit(steering, accelerator, brake, state.Pov, new Dictionary<string, bool>
         {
             ["Cross"] = IsPhysicalButtonPressed("Cross", state, isT98 ? 32u : 1u),
             ["Circle"] = IsPhysicalButtonPressed("Circle", state, 2),
@@ -663,10 +663,10 @@ public partial class MainWindow : Window
             ["GearUp"] = IsPhysicalButtonPressed("GearUp", state, 1),
             ["L3"] = IsPhysicalButtonPressed("L3", state, 64),
             ["R3"] = IsPhysicalButtonPressed("R3", state, 128),
-            ["Share"] = IsPhysicalButtonPressed("Share", state, 256),
+            ["Share"] = sharePressed,
             ["PS"] = IsPhysicalButtonPressed("PS", state, 512),
             ["Options"] = IsPhysicalButtonPressed("Options", state, 1024)
-        });
+        }, r2Pressed, sharePressed);
     }
 
     private bool IsMappedDialActive(string control, WheelInputState state)
