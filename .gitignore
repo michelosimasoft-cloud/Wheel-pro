@@ -1,0 +1,21 @@
+# Build output and local tooling
+[Bb]in/
+[Oo]bj/
+artifacts/
+.tools/
+.dotnet-cli/
+.nuget-packages/
+WheelPro/publish/
+
+# Local test captures and machine-specific files
+video-review-*/
+*.wav
+*.jpg
+*.mp4
+dotnet-sdk-*.exe
+.vs/
+.vscode/
+
+# Local Wheel Pro state
+update-source.json
+*.user
