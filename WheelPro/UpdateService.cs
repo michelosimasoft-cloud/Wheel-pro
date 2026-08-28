@@ -5,6 +5,7 @@ namespace WheelPro;
 
 public sealed class UpdateService
 {
+    private const string PublicUpdateFeed = "https://github.com/michelosimasoft-cloud/Wheel-pro/releases/latest/download/";
     public static string SettingsPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WheelPro", "update-source.json");
 
     public async Task<UpdateInfo?> CheckForUpdateAsync(CancellationToken cancellationToken = default)
@@ -25,7 +26,7 @@ public sealed class UpdateService
 
     private static async Task<string?> ReadSourceAsync(CancellationToken cancellationToken)
     {
-        if (!System.IO.File.Exists(SettingsPath)) return null;
+        if (!System.IO.File.Exists(SettingsPath)) return PublicUpdateFeed;
         await using var stream = System.IO.File.OpenRead(SettingsPath);
         return (await JsonSerializer.DeserializeAsync<UpdateSettings>(stream, cancellationToken: cancellationToken))?.UpdateSource;
     }
