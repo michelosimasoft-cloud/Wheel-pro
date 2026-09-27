@@ -72,7 +72,7 @@ public sealed class CalibrationLearningStore
 {
     private static readonly string DirectoryPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WheelPro", "calibration-history");
     private WheelCalibrationSnapshot? snapshot;
-    private DateTime lastSavedUtc;
+    private DateTime lastSavedUtc = DateTime.UtcNow;
 
     public string Observe(WheelProfile wheel, WheelInputState state, WheelInputState baseline)
     {
@@ -91,7 +91,9 @@ public sealed class CalibrationLearningStore
         var steeringTravel = Ratio((long)snapshot.SteeringMaximum - snapshot.SteeringMinimum, (long)state.XMax - state.XMin);
         var acceleratorTravel = Ratio((long)snapshot.AcceleratorMaximum - snapshot.AcceleratorMinimum, (long)state.YMax - state.YMin);
         var brakeTravel = Ratio((long)snapshot.BrakeMaximum - snapshot.BrakeMinimum, (long)state.ZMax - state.ZMin);
-        return $"Local calibration learning: centre drift {snapshot.LastCentreDrift:P1}; travel observed — steering {steeringTravel:P0}, accelerator {acceleratorTravel:P0}, brake {brakeTravel:P0}.";
+        // Y and Z are raw HID/WinMM axes until guided mapping assigns physical
+        // pedal roles. Different PC modes and driver stacks may swap them.
+        return $"Local input learning: centre drift {snapshot.LastCentreDrift:P1}; travel observed — steering {steeringTravel:P0}, raw axis Y {acceleratorTravel:P0}, raw axis Z {brakeTravel:P0}.";
     }
 
     public void Save(WheelProfile wheel)

@@ -20,3 +20,14 @@ dotnet run --project WheelPro\WheelPro.csproj
 ## Supported platform
 
 Wheel Pro is currently a Windows WPF application. It supports known wheel profiles and a Generic HID profile for unlisted Windows game controllers. Game output can be native wheel/HID, virtual Xbox, or virtual PlayStation controller mode.
+
+The distributed `win-x64` build is self-contained, so target PCs do not need to install .NET separately. Physical wheel detection, vendor-driver behaviour, force feedback, and virtual-controller output still require validation on each supported wheel/driver combination; CI covers compilation, profile/mapping regression tests, and the completeness of the self-contained payload.
+
+## Validation
+
+```powershell
+dotnet run --project tests\WheelPro.RegressionTests\WheelPro.RegressionTests.csproj -c Release
+dotnet publish WheelPro\WheelPro.csproj -c Release -r win-x64 --self-contained -o artifacts\publish
+```
+
+GitHub Actions repeats these checks on a clean Windows runner for every pull request and push to `main`.

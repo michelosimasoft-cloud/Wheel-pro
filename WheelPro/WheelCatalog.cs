@@ -2,7 +2,7 @@ namespace WheelPro;
 
 public sealed record WheelProfile(
     string Brand, string Model, bool HasForceFeedback, bool RequiresVendorDriver, string Rotation,
-    int PedalCount = 2, bool HasHShifter = false, int ButtonCount = 12);
+    int PedalCount = 2, bool HasHShifter = false, int ButtonCount = 12, string[]? HardwareIds = null);
 
 public static class WheelCatalog
 {
@@ -24,7 +24,7 @@ public static class WheelCatalog
 
     private static readonly WheelProfile[] Profiles =
     {
-        new("Thrustmaster", "T98 Ferrari 296 GTB", false, false, "240 degree", 2, false, 13),
+        new("Thrustmaster", "T98 Ferrari 296 GTB", false, false, "240 degree", 2, false, 13, ["VID_044F&PID_B697", "VID_044F&PID_B668"]),
         new("Thrustmaster", "T80 Ferrari 488 GTB", false, false, "240 degree", 2, false, 13),
         new("Thrustmaster", "T128", false, false, "270 degree", 2, false, 13),
         new("Thrustmaster", "T150 / TMX", false, true, "1080 degree", 2, false, 13),
@@ -71,6 +71,12 @@ public static class WheelCatalog
             search.Contains(profile.Brand, StringComparison.OrdinalIgnoreCase));
         return match ?? new WheelProfile("Generic HID", string.IsNullOrWhiteSpace(search) ? "Wheel" : search, false, false, "unknown rotation");
     }
+
+    public static WheelProfile? FindByHardwareId(string hardwareId) => Profiles.FirstOrDefault(profile =>
+        profile.HardwareIds?.Any(id => hardwareId.Contains(id, StringComparison.OrdinalIgnoreCase)) == true);
+
+    public static WheelProfile Resolve(ConnectedWheel wheel) =>
+        FindByHardwareId(wheel.HardwareId) ?? Find(wheel.Name);
 
     public static IEnumerable<string> Suggest(string search)
     {

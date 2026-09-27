@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\..\WheelPro\WheelPro.csproj" /></ItemGroup>
+  <ItemGroup><PackageReference Include="HidSharp" Version="2.6.4" /></ItemGroup>
+</Project>

@@ -16,22 +16,20 @@ public static class WheelDetector
         try
         {
             using var searcher = new ManagementObjectSearcher("SELECT Name, PNPDeviceID FROM Win32_PnPEntity WHERE PNPDeviceID IS NOT NULL");
-            ConnectedWheel? fallback = null;
             foreach (ManagementObject device in searcher.Get())
             {
                 var name = device["Name"]?.ToString() ?? string.Empty;
                 var hardwareId = device["PNPDeviceID"]?.ToString() ?? string.Empty;
                 var isGenericGameController = name.Contains("HID-compliant game controller", StringComparison.OrdinalIgnoreCase) && hardwareId.Contains("HID\\VID_", StringComparison.OrdinalIgnoreCase);
+                var matchesHardwareId = profile.HardwareIds?.Any(id => hardwareId.Contains(id, StringComparison.OrdinalIgnoreCase)) == true;
                 var matchesSelectedBrand = name.Contains(profile.Brand, StringComparison.OrdinalIgnoreCase);
                 var matchesSelectedModel = name.Contains("T98", StringComparison.OrdinalIgnoreCase) || name.Contains(profile.Model.Split(' ')[0], StringComparison.OrdinalIgnoreCase);
                 // A selected profile must only open its matching physical device.
                 // Unknown Windows HID names can still use the Generic HID profile.
-                if (matchesSelectedModel || matchesSelectedBrand || (profile.Brand == "Generic HID" && isGenericGameController))
+                if (matchesHardwareId || matchesSelectedModel || matchesSelectedBrand || (profile.Brand == "Generic HID" && isGenericGameController))
                     return new ConnectedWheel(name, hardwareId);
-                if (hardwareId.Contains("VID_044F&PID_B697", StringComparison.OrdinalIgnoreCase))
-                    fallback ??= new ConnectedWheel(name, hardwareId);
             }
-            return fallback;
+            return null;
         }
         catch (ManagementException) { }
         return null;
@@ -48,11 +46,9 @@ public static class WheelDetector
                 var name = device["Name"]?.ToString() ?? string.Empty;
                 var hardwareId = device["PNPDeviceID"]?.ToString() ?? string.Empty;
                 var isGenericGameController = name.Contains("HID-compliant game controller", StringComparison.OrdinalIgnoreCase) && hardwareId.Contains("HID\\VID_", StringComparison.OrdinalIgnoreCase);
-                if (name.Contains("T98", StringComparison.OrdinalIgnoreCase) || BrandNames.Any(brand => name.Contains(brand, StringComparison.OrdinalIgnoreCase)))
+                if (WheelCatalog.FindByHardwareId(hardwareId) is not null || name.Contains("T98", StringComparison.OrdinalIgnoreCase) || BrandNames.Any(brand => name.Contains(brand, StringComparison.OrdinalIgnoreCase)))
                     return new ConnectedWheel(name, hardwareId);
-                if (hardwareId.Contains("VID_044F&PID_B697", StringComparison.OrdinalIgnoreCase))
-                    fallback ??= new ConnectedWheel(name, hardwareId);
-                else if (isGenericGameController)
+                if (isGenericGameController)
                     fallback ??= new ConnectedWheel(name, hardwareId);
             }
             return fallback;

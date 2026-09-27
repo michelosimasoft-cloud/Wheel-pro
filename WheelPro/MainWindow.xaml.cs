@@ -45,10 +45,16 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, int> learnedPedalDirection = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, uint> learnedPedalNeutral = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, long> learnedSteeringTravel = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> pendingSteeringTravel = new(StringComparer.OrdinalIgnoreCase);
+    private uint? learnedSteeringCenter;
+    private uint? pendingSteeringCenter;
+    private bool loadingGameSessionSettings;
     private readonly Dictionary<string, DateTime> buttonActivity = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<InputMappingStep> mappingSteps = new();
     private Button? mapPedalsButton, mapSteeringButton, mapButtonsButton;
     private Button? steamInputButton;
+    private Button? exclusiveInputButton;
+    private Button? playStationDriverButton;
     private TextBlock? steamInputStatus;
     private Button? backToLibraryButton;
     private Button? resetInputsButton, presetsButton;
@@ -58,6 +64,7 @@ public partial class MainWindow : Window
     private TextBlock? mappingStepText, mappingProgressText;
     private WheelInputState? mappingBaseline;
     private uint mappingPreviousButtons;
+    private bool mappingAwaitingButtonRelease;
     private int mappingStepIndex = -1;
     private string? mappingAxisCandidate;
     private long mappingAxisMaximum;
@@ -72,15 +79,25 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         OutputMode.Items.Add(new ComboBoxItem { Content = "PlayStation controller — Cross selects, Circle goes back" });
-        InstallVirtualDriverButton.Content = "Download latest virtual-controller driver";
+        RefreshVirtualDriverStatus();
         InstallScrollableStudioLayout();
         AddSteamInputControls();
+        AddPlatformDriverControls();
+        AddExclusiveInputControl();
+        RefreshVirtualDriverStatus();
         DataContext = this;
+        LoadGameSessionSettings();
         AddCalibrationDescriptions();
         SavedWheelList.ItemsSource = DisplayWheels;
         SavedWheelList.SelectionChanged += SavedWheelList_SelectionChanged;
         LoadSavedWheels();
-        Loaded += async (_, _) => { await CheckForUpdatesAsync(); StartAutomaticMonitoring(); };
+        Loaded += async (_, _) =>
+        {
+            await CheckForUpdatesAsync();
+            StartAutomaticMonitoring();
+            FirstRunSetupWindow.ShowIfNeeded(this);
+            OpenConnectedWheelAutomatically();
+        };
         inputTimer.Tick += (_, _) => PollWheelInput();
         Closed += (_, _) => { inputTimer.Stop(); backgroundMonitorTimer.Stop(); calibrationLearningStore.Save(selectedProfile); if (backgroundProfile is not null) backgroundCalibrationLearningStore.Save(backgroundProfile); virtualControllerBridge.Dispose(); };
     }
@@ -108,10 +125,10 @@ public partial class MainWindow : Window
         {
             Background = System.Windows.Media.Brushes.White,
             BorderBrush = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#E0E6F0")),
-            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(14),
-            Child = new StackPanel { Children = { new TextBlock { Text = "MAPPING AND PRESETS", FontSize = 10, FontWeight = FontWeights.Bold, Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#6D788C")) }, mappingActionsPanel } }
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(14), Margin = new Thickness(0, 0, 0, 14),
+            Child = new StackPanel { Children = { new TextBlock { Text = "MAPPING AND NAVIGATION", FontSize = 10, FontWeight = FontWeights.Bold, Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#6D788C")) }, mappingActionsPanel } }
         };
-        settings.Children.Add(actions);
+        settings.Children.Insert(0, actions);
     }
 
     private void StartAutomaticMonitoring()
@@ -121,17 +138,26 @@ public partial class MainWindow : Window
         SearchStatus.Text = "Automatic wheel calibration is running in the background.";
     }
 
+    private void OpenConnectedWheelAutomatically()
+    {
+        var detected = WheelDetector.FindConnectedWheel();
+        if (detected is null) return;
+        var profile = WheelCatalog.Resolve(detected);
+        ControllerSearch.Text = $"{profile.Brand} {profile.Model}";
+        OutputMode.SelectedIndex = 1;
+        OpenStudio_Click(this, new RoutedEventArgs());
+    }
+
     private void MonitorAutomatically()
     {
-        if (StudioView.Visibility == Visibility.Visible) return; // the live studio has the higher-frequency monitor
+        if (inputTimer.IsEnabled) return; // the live bridge has the higher-frequency monitor
         if (DateTime.UtcNow >= nextBackgroundWheelScanUtc)
         {
             nextBackgroundWheelScanUtc = DateTime.UtcNow.AddSeconds(3);
             var detected = WheelDetector.FindConnectedWheel();
             if (detected is not null)
             {
-                var profileSearch = detected.Name.Contains("T98", StringComparison.OrdinalIgnoreCase) ? "Thrustmaster T98 Ferrari 296 GTB" : detected.Name;
-                var profile = WheelCatalog.Find(profileSearch);
+                var profile = WheelCatalog.Resolve(detected);
                 if (backgroundProfile is null || !string.Equals($"{backgroundProfile.Brand} {backgroundProfile.Model}", $"{profile.Brand} {profile.Model}", StringComparison.OrdinalIgnoreCase))
                 {
                     if (backgroundProfile is not null) backgroundCalibrationLearningStore.Save(backgroundProfile);
@@ -158,29 +184,18 @@ public partial class MainWindow : Window
 
     private void DetectGameAutomatically()
     {
-        if (!string.IsNullOrWhiteSpace(selectedGameExecutable)) return; // never replace a user-selected lock
-        foreach (var process in Process.GetProcesses())
-        {
-            try
-            {
-                var path = process.MainModule?.FileName;
-                var name = System.IO.Path.GetFileNameWithoutExtension(path ?? process.ProcessName);
-                if (!name.Contains("carx", StringComparison.OrdinalIgnoreCase)) continue;
-                selectedGameExecutable = path;
-                gameSessionWasActive = true;
-                ApplyGameProfileAutomatically();
-                UpdateGameSessionStatus();
-                if (path is not null && !string.Equals(automaticallyDetectedGame, path, StringComparison.OrdinalIgnoreCase))
-                {
-                    automaticallyDetectedGame = path;
-                    if (gameMappingIntelligence.IsConfigured) _ = RefreshOnlineMappingAsync();
-                    else GameIntelligenceStatus.Text = "CarX Street detected. Local calibration learning is active; online advice will run automatically after an AI API key is configured.";
-                }
-                return;
-            }
-            catch { }
-            finally { process.Dispose(); }
-        }
+        var game = RunningGameDetector.FindActiveGame();
+        if (game is null) return;
+        selectedGameExecutable = game.Executable;
+        gameSessionWasActive = true;
+        if (GamePlatform is not null) GamePlatform.SelectedIndex = game.PlatformIndex;
+        ApplyGameProfileAutomatically();
+        UpdateGameSessionStatus();
+        SaveGameSessionSettings();
+        if (string.Equals(automaticallyDetectedGame, game.Executable, StringComparison.OrdinalIgnoreCase)) return;
+        automaticallyDetectedGame = game.Executable;
+        if (gameMappingIntelligence.IsConfigured) _ = RefreshOnlineMappingAsync();
+        else GameIntelligenceStatus.Text = $"{game.DisplayName} detected automatically. Universal wheel output is active without a game lock.";
     }
 
     private async Task CheckForUpdatesAsync()
@@ -218,6 +233,8 @@ public partial class MainWindow : Window
         DriverStatus.Text = selectedProfile.RequiresVendorDriver
             ? "Vendor driver/control software is required for full wheel and force-feedback support."
             : "Uses the Windows HID driver; no vendor download is required.";
+        var exclusiveStatus = ExclusiveInputIntegration.EnableFor(detectedWheel);
+        DriverStatus.Text = $"{DriverStatus.Text} {exclusiveStatus}";
         UpdateCompatibilityStatus();
         UpdateGameSessionStatus();
         UpdatePhysicalInputGroups();
@@ -231,11 +248,27 @@ public partial class MainWindow : Window
         inputBaseline = null;
         inputReadyAtUtc = DateTime.UtcNow.AddMilliseconds(900);
         LoadInputMap();
+        // The T98 is not on the native PC-wheel lists for the requested Forza
+        // and EA titles. Arm XInput before launch so those games see a standard
+        // Xbox controller during their startup device scan.
+        if (selectedProfile.Model.Contains("T98", StringComparison.OrdinalIgnoreCase) &&
+            BuiltInProfiles.FindGameProfile(selectedGameExecutable ?? string.Empty)?.OutputMode is not 0)
+            OutputMode.SelectedIndex = 1;
         ApplyGameProfileAutomatically();
         EnsureMapInputsButton();
-        if (!HasConfirmedPedalCalibration())
+        var needsPedalCalibration = !HasConfirmedPedalCalibration();
+        if (needsPedalCalibration)
             StudioStatus.Text = "Pedal calibration is required before gameplay: choose Map pedals and confirm released 0% and full 100% travel.";
         inputTimer.Start();
+        if (needsPedalCalibration) _ = BeginFirstPedalCalibrationAsync();
+    }
+
+    private async Task BeginFirstPedalCalibrationAsync()
+    {
+        await Task.Delay(1100);
+        if (StudioView.Visibility != Visibility.Visible || HasConfirmedPedalCalibration() || mappingStepIndex >= 0) return;
+        StartInputMapping(MappingSection.Pedals);
+        StudioStatus.Text = "First-time pedal setup started. Follow the accelerator and brake prompts; Wheel Pro will learn their actual axes on this PC.";
     }
 
     private void UpdatePhysicalInputGroups()
@@ -532,11 +565,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        var profileSearch = scannedWheel.Name.Contains("T98", StringComparison.OrdinalIgnoreCase)
-            ? "Thrustmaster T98 Ferrari 296 GTB"
-            : scannedWheel.Name;
+        var matchedProfile = WheelCatalog.Resolve(scannedWheel);
+        var profileSearch = $"{matchedProfile.Brand} {matchedProfile.Model}";
         ControllerSearch.Text = profileSearch;
-        var matchedProfile = WheelCatalog.Find(profileSearch);
         AddWheelButton.IsEnabled = true;
         SearchStatus.Text = matchedProfile.Brand == "Generic HID"
             ? $"USB wheel found: {scannedWheel.Name}. A generic HID profile is ready to add."
@@ -553,7 +584,9 @@ public partial class MainWindow : Window
         var state = WindowsJoystickInput.FindState(selectedProfile, ref joystickDeviceId);
         if (state is null)
         {
-            StudioStatus.Text = "Waiting for Windows game-controller input. If the wheel is connected, set it to PC mode and scan again.";
+            StudioStatus.Text = selectedProfile.Model.Contains("T98", StringComparison.OrdinalIgnoreCase)
+                ? "T98 USB detected, but Windows is not receiving wheel input. Set the wheel's MODE LED to green: hold MODE for 5 seconds, choose green with the D-pad, release MODE, then unplug and reconnect the wheel directly to the PC (no USB hub)."
+                : "Waiting for Windows game-controller input. If the wheel is connected, set it to PC mode and scan again.";
             return;
         }
 
@@ -568,7 +601,8 @@ public partial class MainWindow : Window
             StudioStatus.Text = "Reading the wheel's neutral position…";
             return;
         }
-        var steering = ApplySteeringSensitivity(GetCalibratedSteering(state, baseline));
+        var physicalSteering = GetCalibratedSteering(state, baseline);
+        var steering = ApplySteeringSensitivity(physicalSteering);
         // The connected T98 exposes valid Y and Z ranges in Windows. Its R range
         // is not a usable pedal axis, so use the two genuine analogue channels.
         var pedalsConfirmed = HasConfirmedPedalCalibration();
@@ -579,7 +613,7 @@ public partial class MainWindow : Window
 
         StudioStatus.Text = pedalsConfirmed ? activity : "Pedals are held at 0% until their first calibration is confirmed. Choose Map pedals to record released and full travel.";
         CalibrationMonitorStatus.Text = calibrationLearningStore.Observe(selectedProfile, state, baseline);
-        UpdateLiveInputTiles(state, steering, accelerator, brake, clutch);
+        UpdateLiveInputTiles(state, physicalSteering, accelerator, brake, clutch);
         CaptureMappingInput(state);
         SubmitVirtualController(state, steering, accelerator, brake);
     }
@@ -631,23 +665,26 @@ public partial class MainWindow : Window
     private void SubmitVirtualController(WheelInputState state, double steering, double accelerator, double brake)
     {
         if (OutputMode?.SelectedIndex is not 1 and not 2) return;
-        var gameSessionActive = IsSelectedGameRunning();
-        if (gameSessionActive != gameSessionWasActive)
-        {
-            gameSessionWasActive = gameSessionActive;
-            UpdateGameSessionStatus();
-        }
-        if (!gameSessionActive)
-        {
-            if (virtualControllerBridge.IsConnected) virtualControllerBridge.Dispose();
-            return;
-        }
+        // Create the controller while the session is armed, before launching the
+        // game. Forza and several EA titles enumerate XInput devices at startup.
         var virtualType = OutputMode.SelectedIndex == 2 ? VirtualControllerType.DualShock4 : VirtualControllerType.Xbox360;
         if (!virtualControllerBridge.IsConnected || virtualControllerBridge.ControllerType != virtualType)
         {
-            try { virtualControllerBridge.Connect(virtualType); UpdateCompatibilityStatus(); }
-            catch { virtualControllerBridge.Dispose(); return; }
+            try
+            {
+                virtualControllerBridge.Connect(virtualType);
+                UpdateCompatibilityStatus();
+            }
+            catch (Exception ex)
+            {
+                virtualControllerBridge.Dispose();
+                DriverStatus.Text = $"Virtual controller could not start: {ex.Message}";
+                return;
+            }
         }
+        // Universal mode has no game-process gate. Native-wheel games can see
+        // the physical HID device while controller-only games see this output.
+        gameSessionWasActive = IsSelectedGameRunning();
         var isT98 = selectedProfile.Model.Contains("T98", StringComparison.OrdinalIgnoreCase);
         var r2Pressed = IsPhysicalButtonPressed("R2", state, isT98 ? 1u : 32u);
         // A wheel can use the physical L2/R2 buttons as secondary brake/throttle
@@ -728,24 +765,24 @@ public partial class MainWindow : Window
 
     private double GetCalibratedSteering(WheelInputState state, WheelInputState baseline)
     {
-        var rawDelta = (long)state.X - baseline.X;
+        var rawDelta = (long)state.X - (learnedSteeringCenter ?? baseline.X);
         var key = rawDelta < 0 ? "SteerLeft" : "SteerRight";
         if (!learnedSteeringTravel.TryGetValue(key, out var travelAtNinety) || travelAtNinety <= 0)
             return NormalizeSteering(state.X, state.XMin, state.XMax, baseline.X);
-        return Math.Clamp(rawDelta / (travelAtNinety * (GetWheelHalfRotation() / 90d)), -1, 1);
+        return SteeringResponse.DirectLinear(rawDelta, travelAtNinety);
     }
 
     private double GetDisplaySteeringAngle(WheelInputState state, WheelInputState baseline, double normalized)
     {
-        var rawDelta = (long)state.X - baseline.X;
+        var rawDelta = (long)state.X - (learnedSteeringCenter ?? baseline.X);
         var key = rawDelta < 0 ? "SteerLeft" : "SteerRight";
         return learnedSteeringTravel.TryGetValue(key, out var travelAtNinety) && travelAtNinety > 0
-            ? Math.Clamp(rawDelta / (double)travelAtNinety * 90 * (SensitivitySlider?.Value ?? 1), -180, 180)
-            : normalized * 180;
+            ? Math.Clamp(rawDelta / (double)travelAtNinety * 90, -GetWheelHalfRotation(), GetWheelHalfRotation())
+            : normalized * GetWheelHalfRotation();
     }
 
     private double ApplySteeringSensitivity(double steering) =>
-        Math.Clamp(steering * (SensitivitySlider?.Value ?? 1), -1, 1);
+        SteeringResponse.ApplyLinearGain(steering, SensitivitySlider?.Value ?? 1);
 
     private double GetWheelHalfRotation()
     {
@@ -761,6 +798,9 @@ public partial class MainWindow : Window
         mapPedalsButton = CreateMappingButton("Map pedals", 0, () => StartInputMapping(MappingSection.Pedals), accent, border);
         mapSteeringButton = CreateMappingButton("Map steering", 0, () => StartInputMapping(MappingSection.Steering), accent, border);
         mapButtonsButton = CreateMappingButton("Map buttons", 0, () => StartInputMapping(MappingSection.Buttons), accent, border);
+        var resetPedalsButton = CreateMappingButton("Reset pedals", 0, () => ResetMappingSection(MappingSection.Pedals), System.Windows.Media.Brushes.Firebrick, border);
+        var resetSteeringButton = CreateMappingButton("Reset steering", 0, () => ResetMappingSection(MappingSection.Steering), System.Windows.Media.Brushes.Firebrick, border);
+        var resetButtonsButton = CreateMappingButton("Reset buttons", 0, () => ResetMappingSection(MappingSection.Buttons), System.Windows.Media.Brushes.Firebrick, border);
 
         backToLibraryButton = new Button { Content = "Back to library", Padding = new Thickness(10, 7, 10, 7) };
         backToLibraryButton.Click += (_, _) => ReturnToLibrary();
@@ -773,6 +813,7 @@ public partial class MainWindow : Window
         if (mappingActionsPanel is not null)
         {
             mappingActionsPanel.Children.Add(mapPedalsButton); mappingActionsPanel.Children.Add(mapSteeringButton); mappingActionsPanel.Children.Add(mapButtonsButton);
+            mappingActionsPanel.Children.Add(resetPedalsButton); mappingActionsPanel.Children.Add(resetSteeringButton); mappingActionsPanel.Children.Add(resetButtonsButton);
             mappingActionsPanel.Children.Add(presetsButton); mappingActionsPanel.Children.Add(resetInputsButton); mappingActionsPanel.Children.Add(backToLibraryButton);
         }
     }
@@ -786,10 +827,35 @@ public partial class MainWindow : Window
 
     private void ResetInputMapping()
     {
-        learnedButtonMap.Clear(); learnedAxisMap.Clear(); learnedPedalTravel.Clear(); learnedPedalDirection.Clear(); learnedPedalNeutral.Clear(); learnedSteeringTravel.Clear(); buttonActivity.Clear();
+        learnedButtonMap.Clear(); learnedAxisMap.Clear(); learnedPedalTravel.Clear(); learnedPedalDirection.Clear(); learnedPedalNeutral.Clear(); learnedSteeringTravel.Clear(); learnedSteeringCenter = null; pendingSteeringCenter = null; buttonActivity.Clear();
         if (System.IO.File.Exists(InputMapPath)) System.IO.File.Delete(InputMapPath);
         inputBaseline = null;
         StudioStatus.Text = "Input map reset. Use Map inputs to learn this wheel again.";
+    }
+
+    private void ResetMappingSection(MappingSection section)
+    {
+        if (mappingStepIndex >= 0) StopInputMapping(false);
+        switch (section)
+        {
+            case MappingSection.Pedals:
+                learnedAxisMap.Remove("Accelerator"); learnedAxisMap.Remove("Brake");
+                learnedPedalTravel.Remove("Accelerator"); learnedPedalTravel.Remove("Brake");
+                learnedPedalDirection.Remove("Accelerator"); learnedPedalDirection.Remove("Brake");
+                learnedPedalNeutral.Remove("Accelerator"); learnedPedalNeutral.Remove("Brake");
+                break;
+            case MappingSection.Steering:
+                learnedSteeringTravel.Clear(); pendingSteeringTravel.Clear(); learnedSteeringCenter = null; pendingSteeringCenter = null;
+                break;
+            case MappingSection.Buttons:
+                learnedButtonMap.Clear(); buttonActivity.Clear();
+                learnedAxisMap.Remove("Sensitivity"); learnedAxisMap.Remove("SensitivityGreen"); learnedAxisMap.Remove("SensitivityRed");
+                break;
+        }
+        inputBaseline = null;
+        inputReadyAtUtc = DateTime.UtcNow.AddMilliseconds(500);
+        SaveInputMap();
+        StudioStatus.Text = $"{section} mapping reset. Choose Map {section.ToString().ToLowerInvariant()} to learn only that group again.";
     }
 
     private string PresetDirectory => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WheelPro", "presets", $"{selectedProfile.Brand}-{selectedProfile.Model}".ToLowerInvariant().Replace(' ', '-').Replace('/', '-'));
@@ -828,9 +894,6 @@ public partial class MainWindow : Window
 
     private void ReturnToLibrary()
     {
-        inputTimer.Stop();
-        virtualControllerBridge.Dispose();
-        gameSessionWasActive = false;
         mappingStepIndex = -1;
         if (mappingOverlay is not null) mappingOverlay.Visibility = Visibility.Collapsed;
         StudioView.Visibility = Visibility.Collapsed;
@@ -855,12 +918,21 @@ public partial class MainWindow : Window
     private void StartInputMapping(MappingSection section)
     {
         mappingSteps.Clear();
-        var isXboxLayout = selectedProfile.Model.Contains("G920", StringComparison.OrdinalIgnoreCase) || selectedProfile.Brand == "Turtle Beach";
-        var isPlayStationLayout = selectedProfile.Brand == "Thrustmaster" || selectedProfile.Brand == "HORI";
+        var layout = GetControllerVisualLayout();
+        var isXboxLayout = layout == ControllerVisualLayout.Xbox;
+        var isPlayStationLayout = layout == ControllerVisualLayout.PlayStation;
         var faceNames = isPlayStationLayout
-            ? new[] { "Triangle", "Circle", "Cross / X", "Square" }
-            : isXboxLayout ? new[] { "Y", "B", "A", "X" } : new[] { "Face button 1", "Face button 2", "Face button 3", "Face button 4" };
+            ? new[] { "Triangle (△)", "Circle (○)", "Cross (×)", "Square (□)" }
+            : isXboxLayout ? new[] { "Y", "B", "A", "X" } : new[] { "upper face button", "right face button", "lower face button", "left face button" };
         var homeName = isPlayStationLayout ? "PlayStation" : isXboxLayout ? "Xbox / Home" : "Home";
+        var downshiftName = isPlayStationLayout ? "downshift / L1 paddle" : isXboxLayout ? "downshift / LB paddle" : "downshift paddle";
+        var upshiftName = isPlayStationLayout ? "upshift / R1 paddle" : isXboxLayout ? "upshift / RB paddle" : "upshift paddle";
+        var leftTriggerName = isPlayStationLayout ? "L2" : isXboxLayout ? "LT" : "left trigger";
+        var rightTriggerName = isPlayStationLayout ? "R2" : isXboxLayout ? "RT" : "right trigger";
+        var leftStickName = isPlayStationLayout ? "L3" : isXboxLayout ? "left-stick click (LS)" : "left-stick click";
+        var rightStickName = isPlayStationLayout ? "R3" : isXboxLayout ? "right-stick click (RS)" : "right-stick click";
+        var shareName = isPlayStationLayout ? "SHARE / CREATE" : isXboxLayout ? "VIEW / BACK" : "share / view";
+        var optionsName = isPlayStationLayout ? "OPTIONS" : isXboxLayout ? "MENU / START" : "menu / options";
         if (section == MappingSection.Pedals)
             mappingSteps.AddRange(new[] { new InputMappingStep("Accelerator", "Calibrate accelerator.", MappingKind.Axis), new InputMappingStep("Brake", "Calibrate brake.", MappingKind.Axis) });
         if (section == MappingSection.Steering)
@@ -868,28 +940,35 @@ public partial class MainWindow : Window
         if (section == MappingSection.Buttons)
             mappingSteps.AddRange(new[]
         {
-            new InputMappingStep("GearDown", "Press the downshift / L1 paddle.", MappingKind.Button),
-            new InputMappingStep("GearUp", "Press the upshift / R1 paddle.", MappingKind.Button),
+            new InputMappingStep("GearDown", $"Press the {downshiftName}.", MappingKind.Button),
+            new InputMappingStep("GearUp", $"Press the {upshiftName}.", MappingKind.Button),
             new InputMappingStep("DpadUp", "Press D-pad Up.", MappingKind.Dpad),
             new InputMappingStep("DpadDown", "Press D-pad Down.", MappingKind.Dpad),
             new InputMappingStep("DpadLeft", "Press D-pad Left.", MappingKind.Dpad),
             new InputMappingStep("DpadRight", "Press D-pad Right.", MappingKind.Dpad),
             new InputMappingStep("Triangle", $"Press {faceNames[0]}.", MappingKind.Button), new InputMappingStep("Circle", $"Press {faceNames[1]}.", MappingKind.Button),
             new InputMappingStep("Cross", $"Press {faceNames[2]}.", MappingKind.Button), new InputMappingStep("Square", $"Press {faceNames[3]}.", MappingKind.Button),
-            new InputMappingStep("L2", "Press L2.", MappingKind.Button), new InputMappingStep("R2", "Press R2.", MappingKind.Button),
-            new InputMappingStep("L3", "Press L3.", MappingKind.Button), new InputMappingStep("R3", "Press R3.", MappingKind.Button),
-            new InputMappingStep("Share", "Press SHARE / CREATE.", MappingKind.Button),
-            new InputMappingStep("PS", $"Press the {homeName} button.", MappingKind.Button), new InputMappingStep("Options", "Press OPTIONS / MENU.", MappingKind.Button)
+            new InputMappingStep("L2", $"Press {leftTriggerName}.", MappingKind.Button), new InputMappingStep("R2", $"Press {rightTriggerName}.", MappingKind.Button),
+            new InputMappingStep("L3", $"Press {leftStickName}.", MappingKind.Button), new InputMappingStep("R3", $"Press {rightStickName}.", MappingKind.Button),
+            new InputMappingStep("Share", $"Press {shareName}.", MappingKind.Button),
+            new InputMappingStep("PS", $"Press the {homeName} button.", MappingKind.Button), new InputMappingStep("Options", $"Press {optionsName}.", MappingKind.Button)
         });
         if (section == MappingSection.Buttons)
             for (var button = 14; button < selectedProfile.ButtonCount; button++) mappingSteps.Add(new InputMappingStep($"Extra{button + 1}", $"Press additional wheel button {button + 1}.", MappingKind.Button));
         var state = WindowsJoystickInput.FindState(selectedProfile, ref joystickDeviceId);
-        if (state is null) { StudioStatus.Text = "Connect the wheel in PC mode before mapping inputs."; return; }
+        if (state is null)
+        {
+            StudioStatus.Text = selectedProfile.Model.Contains("T98", StringComparison.OrdinalIgnoreCase)
+                ? "The T98 is connected but not sending PC input. Change its MODE LED to green, unplug/reconnect it directly to the PC, then map again."
+                : "Connect the wheel in PC mode before mapping inputs.";
+            return;
+        }
         mappingBaseline = state;
         mappingPreviousButtons = state.Buttons;
+        mappingAwaitingButtonRelease = state.Buttons != 0;
         mappingAxisCandidate = null; mappingAxisMaximum = 0; mappingAxisPeakValue = 0; pedalMappingStage = PedalMappingStage.None; steeringMappingStage = SteeringMappingStage.None;
         if (section == MappingSection.Pedals) { learnedAxisMap.Remove("Accelerator"); learnedAxisMap.Remove("Brake"); learnedPedalTravel.Remove("Accelerator"); learnedPedalTravel.Remove("Brake"); learnedPedalDirection.Remove("Accelerator"); learnedPedalDirection.Remove("Brake"); learnedPedalNeutral.Remove("Accelerator"); learnedPedalNeutral.Remove("Brake"); }
-        if (section == MappingSection.Steering) learnedSteeringTravel.Clear();
+        if (section == MappingSection.Steering) { pendingSteeringTravel.Clear(); pendingSteeringCenter = null; }
         if (section == MappingSection.Buttons) { learnedButtonMap.Clear(); learnedButtonMap.Remove("Sensitivity"); learnedAxisMap.Remove("Sensitivity"); learnedButtonMap.Remove("SensitivityGreen"); learnedButtonMap.Remove("SensitivityRed"); learnedAxisMap.Remove("SensitivityGreen"); learnedAxisMap.Remove("SensitivityRed"); }
         mappingStepIndex = 0;
         ShowMappingOverlay();
@@ -934,6 +1013,12 @@ public partial class MainWindow : Window
     {
         if (mappingStepIndex < 0 || mappingBaseline is null) return;
         var step = mappingSteps[mappingStepIndex];
+        if ((step.Kind is MappingKind.Button or MappingKind.Dial) && mappingAwaitingButtonRelease)
+        {
+            mappingPreviousButtons = state.Buttons;
+            if (state.Buttons == 0) mappingAwaitingButtonRelease = false;
+            return;
+        }
         var captured = false;
         if (step.Kind == MappingKind.Axis)
         {
@@ -944,7 +1029,9 @@ public partial class MainWindow : Window
             var newPress = state.Buttons & ~mappingPreviousButtons;
             if (newPress != 0)
             {
-                learnedButtonMap[step.Key] = LowestButtonMask(newPress);
+                ButtonMapping.AssignUnique(learnedButtonMap, step.Key, LowestButtonMask(newPress));
+                mappingAwaitingButtonRelease = true;
+                buttonActivity.Clear();
                 captured = true;
             }
         }
@@ -962,7 +1049,9 @@ public partial class MainWindow : Window
             var newPress = state.Buttons & ~mappingPreviousButtons;
             if (newPress != 0)
             {
-                learnedButtonMap[step.Key] = LowestButtonMask(newPress);
+                ButtonMapping.AssignUnique(learnedButtonMap, step.Key, LowestButtonMask(newPress));
+                mappingAwaitingButtonRelease = true;
+                buttonActivity.Clear();
                 captured = true;
             }
             else if (FindChangedPedalAxis(state, mappingBaseline) is { } dialAxis)
@@ -1026,6 +1115,9 @@ public partial class MainWindow : Window
         if (steeringMappingStage == SteeringMappingStage.ConfirmCentre)
         {
             if (newPress == 0) return;
+            pendingSteeringCenter = pendingSteeringCenter is uint firstCenter
+                ? (uint)(((ulong)firstCenter + state.X) / 2)
+                : state.X;
             mappingBaseline = state;
             steeringMappingStage = SteeringMappingStage.ConfirmNinety;
             var direction = step.Kind == MappingKind.SteerLeft ? "left" : "right";
@@ -1043,7 +1135,15 @@ public partial class MainWindow : Window
             if (mappingStepText is not null) mappingStepText.Text = $"No 90° {direction} turn was detected. Keep the wheel 90° {direction} and press any wheel button again.";
             return;
         }
-        learnedSteeringTravel[step.Key] = travel;
+        pendingSteeringTravel[step.Key] = travel;
+        if (step.Key == "SteerRight" && pendingSteeringTravel.ContainsKey("SteerLeft"))
+        {
+            learnedSteeringTravel.Clear();
+            foreach (var calibration in pendingSteeringTravel) learnedSteeringTravel[calibration.Key] = calibration.Value;
+            learnedSteeringCenter = pendingSteeringCenter;
+            pendingSteeringTravel.Clear();
+            pendingSteeringCenter = null;
+        }
         steeringMappingStage = SteeringMappingStage.None;
         captured = true;
     }
@@ -1104,13 +1204,18 @@ public partial class MainWindow : Window
             SaveInputMap();
             StudioStatus.Text = $"Input mapping saved for {selectedProfile.Brand} {selectedProfile.Model}. The live graphic now follows the physical controls.";
         }
+        else
+        {
+            pendingSteeringTravel.Clear();
+            pendingSteeringCenter = null;
+        }
     }
 
     private string InputMapPath => System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WheelPro", "device-cache", $"{selectedProfile.Brand}-{selectedProfile.Model}".ToLowerInvariant().Replace(' ', '-').Replace('/', '-') + ".input-map.json");
 
     private void LoadInputMap()
     {
-        learnedButtonMap.Clear(); learnedAxisMap.Clear(); learnedPedalTravel.Clear(); learnedPedalDirection.Clear(); learnedPedalNeutral.Clear(); learnedSteeringTravel.Clear();
+        learnedButtonMap.Clear(); learnedAxisMap.Clear(); learnedPedalTravel.Clear(); learnedPedalDirection.Clear(); learnedPedalNeutral.Clear(); learnedSteeringTravel.Clear(); learnedSteeringCenter = null;
         try
         {
             if (!System.IO.File.Exists(InputMapPath))
@@ -1122,18 +1227,25 @@ public partial class MainWindow : Window
             var stored = JsonSerializer.Deserialize<StoredInputMap>(System.IO.File.ReadAllText(InputMapPath));
             if (stored is null) return;
             foreach (var binding in stored.Buttons ?? new Dictionary<string, uint>()) learnedButtonMap[binding.Key] = binding.Value;
+            ButtonMapping.RemoveDuplicateBindings(learnedButtonMap);
             foreach (var binding in stored.Axes ?? new Dictionary<string, string>()) learnedAxisMap[binding.Key] = binding.Value;
             foreach (var travel in stored.PedalTravel ?? new Dictionary<string, long>()) learnedPedalTravel[travel.Key] = travel.Value;
             foreach (var direction in stored.PedalDirection ?? new Dictionary<string, int>()) learnedPedalDirection[direction.Key] = direction.Value;
             foreach (var neutral in stored.PedalNeutral ?? new Dictionary<string, uint>()) learnedPedalNeutral[neutral.Key] = neutral.Value;
             foreach (var travel in stored.SteeringTravel ?? new Dictionary<string, long>()) learnedSteeringTravel[travel.Key] = travel.Value;
+            learnedSteeringCenter = stored.SteeringCenter;
+            if (learnedSteeringTravel.Count > 0 && learnedSteeringCenter is null)
+                learnedSteeringTravel.Clear();
             if (stored.Sensitivity is double sensitivity && SensitivitySlider is not null) SensitivitySlider.Value = Math.Clamp(sensitivity, SensitivitySlider.Minimum, SensitivitySlider.Maximum);
             if (stored.Deadzone is double deadzone && DeadzoneSlider is not null) DeadzoneSlider.Value = Math.Clamp(deadzone, DeadzoneSlider.Minimum, DeadzoneSlider.Maximum);
             if (stored.OutputMode is int outputMode && OutputMode is not null && outputMode >= 0 && outputMode < OutputMode.Items.Count) OutputMode.SelectedIndex = outputMode;
-            if (!learnedPedalDirection.ContainsKey("Accelerator") || !learnedPedalDirection.ContainsKey("Brake"))
+            if (!HasConfirmedPedalCalibration())
             {
                 learnedAxisMap.Remove("Accelerator"); learnedAxisMap.Remove("Brake");
                 learnedPedalTravel.Remove("Accelerator"); learnedPedalTravel.Remove("Brake");
+                learnedPedalDirection.Remove("Accelerator"); learnedPedalDirection.Remove("Brake");
+                learnedPedalNeutral.Remove("Accelerator"); learnedPedalNeutral.Remove("Brake");
+                SaveInputMap();
             }
         }
         catch { }
@@ -1150,7 +1262,8 @@ public partial class MainWindow : Window
             Sensitivity = SensitivitySlider?.Value ?? 1,
             Deadzone = DeadzoneSlider?.Value ?? 3,
             Buttons = learnedButtonMap, Axes = learnedAxisMap, PedalTravel = learnedPedalTravel,
-            PedalDirection = learnedPedalDirection, PedalNeutral = learnedPedalNeutral, SteeringTravel = learnedSteeringTravel
+            PedalDirection = learnedPedalDirection, PedalNeutral = learnedPedalNeutral, SteeringTravel = learnedSteeringTravel,
+            SteeringCenter = learnedSteeringCenter
         }, new JsonSerializerOptions { WriteIndented = true }));
     }
 
@@ -1392,8 +1505,7 @@ public partial class MainWindow : Window
         if (OutputMode?.SelectedIndex is 1 or 2)
         {
             virtualControllerBridge.Dispose();
-            gameSessionWasActive = false;
-            StudioStatus.Text = "Virtual controller is locked until the selected game process is running.";
+            StudioStatus.Text = "Universal controller output is active whenever Wheel Pro is running; no game lock is required.";
         }
         else
         {
@@ -1401,18 +1513,20 @@ public partial class MainWindow : Window
         }
         UpdateCompatibilityStatus();
         UpdateGameSessionStatus();
+        SaveGameSessionSettings();
         if (StudioView.Visibility == Visibility.Visible) UpdatePhysicalInputGroups();
     }
 
     private void GamePlatform_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         UpdateGameSessionStatus();
+        SaveGameSessionSettings();
         if (GameIntelligenceStatus is null) return;
         GameIntelligenceStatus.Text = GamePlatform?.SelectedIndex switch
         {
-            1 => "Steam selected. Wheel Pro exposes the selected Xbox or PlayStation controller only while the chosen game executable runs. Use Steam Input settings for that game's policy.",
-            2 => "EA app / EA Play selected. Wheel Pro exposes the selected controller directly to the chosen game executable; EA app does not provide a per-game controller-mapping API.",
-            _ => "Any Windows game selected. Choose the actual game .exe to keep virtual output limited to that game session."
+            1 => "Steam selected. Universal controller output stays active; use Steam Input only if a game requires a specific Steam policy.",
+            2 => "EA app / EA Play selected. Universal Xbox output remains available before and during every game launch.",
+            _ => "Universal Windows mode is active. Games may use either the physical HID wheel or Wheel Pro's controller output."
         };
     }
 
@@ -1426,8 +1540,8 @@ public partial class MainWindow : Window
                     ? "Active: Wheel Pro is exposing a DualShock 4 controller. Cross selects, Circle goes back; steering and pedals are analogue."
                     : "Active: Wheel Pro is exposing an Xbox 360 controller. Steering is left stick; pedals and L2/R2 are triggers; mapped face buttons, paddles and D-pad are forwarded."
                 : OutputMode.SelectedIndex == 2
-                    ? "Locked: a virtual PlayStation controller is created only while the selected game executable is running."
-                    : "Locked: a virtual Xbox controller is created only while the selected game executable is running.";
+                    ? "Ready: Wheel Pro exposes a PlayStation controller continuously while the app is running."
+                    : "Ready: Wheel Pro exposes an Xbox controller continuously while the app is running.";
     }
 
     private void ChooseGameExecutable_Click(object sender, RoutedEventArgs e)
@@ -1438,6 +1552,7 @@ public partial class MainWindow : Window
         gameSessionWasActive = IsSelectedGameRunning();
         ApplyGameProfileAutomatically();
         UpdateGameSessionStatus();
+        SaveGameSessionSettings();
         StudioStatus.Text = "Game lock configured. Launch this game normally (including through Steam or EA app); Wheel Pro enables controller input only while its process is open.";
         _ = RefreshOnlineMappingAsync();
     }
@@ -1449,7 +1564,37 @@ public partial class MainWindow : Window
         virtualControllerBridge.Dispose();
         UpdateGameSessionStatus();
         UpdateCompatibilityStatus();
+        SaveGameSessionSettings();
         GameIntelligenceStatus.Text = "Online game intelligence waits for a selected game.";
+    }
+
+    private void LoadGameSessionSettings()
+    {
+        loadingGameSessionSettings = true;
+        try
+        {
+            var settings = GameSessionSettingsStore.Load();
+            selectedGameExecutable = string.IsNullOrWhiteSpace(settings.GameExecutable) ? null : settings.GameExecutable;
+            if (GamePlatform is not null && settings.Platform >= 0 && settings.Platform < GamePlatform.Items.Count)
+                GamePlatform.SelectedIndex = settings.Platform;
+            if (OutputMode is not null && settings.OutputMode >= 0 && settings.OutputMode < OutputMode.Items.Count)
+                OutputMode.SelectedIndex = settings.OutputMode;
+            gameSessionWasActive = IsSelectedGameRunning();
+            ApplyGameProfileAutomatically();
+            UpdateGameSessionStatus();
+        }
+        finally { loadingGameSessionSettings = false; }
+    }
+
+    private void SaveGameSessionSettings()
+    {
+        if (loadingGameSessionSettings || OutputMode is null || GamePlatform is null) return;
+        GameSessionSettingsStore.Save(new GameSessionSettings
+        {
+            GameExecutable = selectedGameExecutable,
+            Platform = GamePlatform.SelectedIndex,
+            OutputMode = OutputMode.SelectedIndex
+        });
     }
 
     private async void RefreshOnlineMapping_Click(object sender, RoutedEventArgs e) => await RefreshOnlineMappingAsync();
@@ -1490,12 +1635,9 @@ public partial class MainWindow : Window
     {
         if (string.IsNullOrWhiteSpace(selectedGameExecutable)) return false;
         var processName = System.IO.Path.GetFileNameWithoutExtension(selectedGameExecutable);
-        return Process.GetProcessesByName(processName).Any(process =>
-        {
-            try { return string.Equals(process.MainModule?.FileName, selectedGameExecutable, StringComparison.OrdinalIgnoreCase); }
-            catch { return true; }
-            finally { process.Dispose(); }
-        });
+        var processes = Process.GetProcessesByName(processName);
+        try { return processes.Length > 0; }
+        finally { foreach (var process in processes) process.Dispose(); }
     }
 
     private void UpdateGameSessionStatus()
@@ -1503,21 +1645,23 @@ public partial class MainWindow : Window
         if (GameSessionStatus is null) return;
         if (string.IsNullOrWhiteSpace(selectedGameExecutable))
         {
-            GameSessionStatus.Text = "No game selected. Virtual controller output remains blocked outside games.";
+            GameSessionStatus.Text = "Automatic universal mode: no game selection is required. Launch any game after Wheel Pro detects the wheel.";
             RefreshSteamInputStatus();
             return;
         }
         var name = System.IO.Path.GetFileName(selectedGameExecutable);
         var platform = GamePlatform?.SelectedIndex switch { 1 => "Steam", 2 => "EA app / EA Play", _ => "Windows" };
         GameSessionStatus.Text = gameSessionWasActive
-            ? $"Active: {name} is running through {platform}. Virtual controller input is enabled for this game session."
-            : $"Armed for {platform}: waiting for {name}. No virtual controller is exposed until it starts.";
+            ? $"Detected: {name} is running through {platform}. Universal controller input remains active."
+            : $"Optional profile saved for {name} through {platform}. Universal input also works without this selection.";
         RefreshSteamInputStatus();
     }
 
     private void AddSteamInputControls()
     {
         if (GameSessionStatus.Parent is not StackPanel panel) return;
+        var heading = panel.Children.OfType<TextBlock>().FirstOrDefault();
+        if (heading is not null) heading.Text = "AUTOMATIC GAME COMPATIBILITY";
         steamInputStatus = new TextBlock { Foreground = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#697589")), FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
         steamInputButton = new Button { Content = "Open Steam Input settings", HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 6, 0, 0) };
         steamInputButton.Click += (_, _) =>
@@ -1529,6 +1673,38 @@ public partial class MainWindow : Window
         RefreshSteamInputStatus();
     }
 
+    private void AddExclusiveInputControl()
+    {
+        if (InstallVirtualDriverButton.Parent is not StackPanel panel) return;
+        exclusiveInputButton = new Button
+        {
+            Content = ExclusiveInputIntegration.IsInstalled ? "Exclusive input support installed" : "Install exclusive input support",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 6, 0, 0),
+            IsEnabled = !ExclusiveInputIntegration.IsInstalled
+        };
+        exclusiveInputButton.Click += (_, _) =>
+        {
+            try { Process.Start(new ProcessStartInfo(ExclusiveInputIntegration.OfficialDownloadUrl) { UseShellExecute = true }); }
+            catch (Exception ex) { DriverStatus.Text = $"Could not open the official HidHide installer page: {ex.Message}"; }
+        };
+        panel.Children.Add(exclusiveInputButton);
+    }
+
+    private void AddPlatformDriverControls()
+    {
+        if (InstallVirtualDriverButton.Parent is not StackPanel panel) return;
+        playStationDriverButton = new Button
+        {
+            Content = "Install PlayStation controller driver",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+        playStationDriverButton.Click += InstallVirtualDriver_Click;
+        var xboxPosition = panel.Children.IndexOf(InstallVirtualDriverButton);
+        panel.Children.Insert(Math.Max(0, xboxPosition + 1), playStationDriverButton);
+    }
+
     private void RefreshSteamInputStatus()
     {
         if (steamInputStatus is not null) steamInputStatus.Text = SteamInputIntegration.GetStatus(OutputMode?.SelectedIndex is 1 or 2);
@@ -1536,6 +1712,12 @@ public partial class MainWindow : Window
 
     private async void InstallVirtualDriver_Click(object sender, RoutedEventArgs e)
     {
+        if (SetupDiagnostics.IsVirtualControllerDriverInstalled())
+        {
+            RefreshVirtualDriverStatus();
+            StudioStatus.Text = "The virtual-controller driver is already installed. No download is needed.";
+            return;
+        }
         try
         {
             InstallVirtualDriverButton.IsEnabled = false;
@@ -1557,7 +1739,21 @@ public partial class MainWindow : Window
             DriverStatus.Text = "Could not download the latest virtual-controller driver. Check the internet connection and try again.";
             StudioStatus.Text = $"Driver download failed: {ex.Message}";
         }
-        finally { InstallVirtualDriverButton.IsEnabled = true; }
+        finally { RefreshVirtualDriverStatus(); }
+    }
+
+    private void RefreshVirtualDriverStatus()
+    {
+        var installed = SetupDiagnostics.IsVirtualControllerDriverInstalled();
+        InstallVirtualDriverButton.Content = installed ? "Xbox controller driver installed" : "Install Xbox controller driver";
+        InstallVirtualDriverButton.IsEnabled = !installed;
+        if (playStationDriverButton is not null)
+        {
+            playStationDriverButton.Content = installed ? "PlayStation controller driver installed" : "Install PlayStation controller driver";
+            playStationDriverButton.IsEnabled = !installed;
+        }
+        if (installed && DriverStatus is not null)
+            DriverStatus.Text = "Xbox and PlayStation virtual-controller support is installed. Both modes use the same verified Windows controller bus.";
     }
 
     private void OpenOfficialDriverPage_Click(object sender, RoutedEventArgs e)
@@ -1623,5 +1819,6 @@ public partial class MainWindow : Window
         public Dictionary<string, int>? PedalDirection { get; set; }
         public Dictionary<string, uint>? PedalNeutral { get; set; }
         public Dictionary<string, long>? SteeringTravel { get; set; }
+        public uint? SteeringCenter { get; set; }
     }
 }

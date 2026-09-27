@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace WheelPro;
 
 public sealed record WheelInputState(
-    string DeviceName, uint X, uint Y, uint Z, uint R, uint U, uint V, uint Buttons, uint Pov,
+    string DeviceName, ushort ManufacturerId, ushort ProductId, uint X, uint Y, uint Z, uint R, uint U, uint V, uint Buttons, uint Pov,
     uint XMin, uint XMax, uint YMin, uint YMax, uint ZMin, uint ZMax, uint RMin, uint RMax,
     uint UMin, uint UMax, uint VMin, uint VMax)
 {
@@ -27,7 +27,19 @@ public static class WindowsJoystickInput
 
     public static WheelInputState? FindState(WheelProfile profile, ref int deviceId)
     {
-        if (deviceId >= 0 && TryRead(deviceId, out var savedState, out _)) return savedState;
+        if (profile.HardwareIds is { Length: > 0 } && GamingInputWheelInput.FindState(profile) is { } gamingInputState)
+        {
+            deviceId = -3;
+            return gamingInputState;
+        }
+        if (deviceId == -3) deviceId = -1;
+        if (deviceId >= 0 && TryRead(deviceId, out var savedState, out var savedName))
+        {
+            if (MatchesProfile(profile, savedState, savedName)) return savedState;
+            // Windows can reuse a joystick number after unplugging or changing
+            // USB ports. Never retain a slot that now belongs to another device.
+            deviceId = -1;
+        }
 
         var deviceCount = Math.Min(joyGetNumDevs(), 16u);
         WheelInputState? fallback = null;
@@ -35,8 +47,8 @@ public static class WindowsJoystickInput
         for (uint id = 0; id < deviceCount; id++)
         {
             if (!TryRead((int)id, out var state, out var name)) continue;
-            if (name.Contains(profile.Brand, StringComparison.OrdinalIgnoreCase) ||
-                profile.Model.Split(new[] { ' ', '/' }, StringSplitOptions.RemoveEmptyEntries).Any(part => part.Length >= 3 && name.Contains(part, StringComparison.OrdinalIgnoreCase)))
+            var hardwareKey = $"VID_{state.ManufacturerId:X4}&PID_{state.ProductId:X4}";
+            if (MatchesProfile(profile, state, name))
             {
                 deviceId = (int)id;
                 return state;
@@ -44,8 +56,33 @@ public static class WindowsJoystickInput
             fallback ??= state;
             fallbackId = (int)id;
         }
+        // A known wheel must never bind to an unrelated generic joystick slot.
+        // Device ordering differs between PCs and can include audio/HID devices.
+        if (profile.HardwareIds is { Length: > 0 })
+        {
+            deviceId = -1;
+            return null;
+        }
         deviceId = fallbackId;
         return fallback;
+    }
+
+    private static bool MatchesProfile(WheelProfile profile, WheelInputState state, string deviceName)
+    {
+        var hardwareKey = $"VID_{state.ManufacturerId:X4}&PID_{state.ProductId:X4}";
+        return profile.HardwareIds?.Any(id => id.Equals(hardwareKey, StringComparison.OrdinalIgnoreCase)) == true ||
+               deviceName.Contains(profile.Brand, StringComparison.OrdinalIgnoreCase) ||
+               profile.Model.Split(new[] { ' ', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                   .Any(part => part.Length >= 3 && deviceName.Contains(part, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static IReadOnlyList<(int DeviceId, WheelInputState State)> EnumerateStates()
+    {
+        var states = new List<(int, WheelInputState)>();
+        var deviceCount = Math.Min(joyGetNumDevs(), 16u);
+        for (uint id = 0; id < deviceCount; id++)
+            if (TryRead((int)id, out var state, out _)) states.Add(((int)id, state));
+        return states;
     }
 
     private static bool TryRead(int deviceId, out WheelInputState state, out string deviceName)
@@ -61,7 +98,7 @@ public static class WindowsJoystickInput
             state = null!; deviceName = string.Empty; return false;
         }
         deviceName = caps.Name?.Trim() ?? $"Controller {deviceId + 1}";
-        state = new WheelInputState(deviceName, info.X, info.Y, info.Z, info.R, info.U, info.V, info.Buttons, info.Pov,
+        state = new WheelInputState(deviceName, caps.ManufacturerId, caps.ProductId, info.X, info.Y, info.Z, info.R, info.U, info.V, info.Buttons, info.Pov,
             caps.XMin, caps.XMax, caps.YMin, caps.YMax, caps.ZMin, caps.ZMax, caps.RMin, caps.RMax,
             caps.UMin, caps.UMax, caps.VMin, caps.VMax);
         return true;

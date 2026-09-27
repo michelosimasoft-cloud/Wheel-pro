@@ -6,6 +6,18 @@ public sealed record GameControllerProfile(string Name, int OutputMode, string D
 
 public static class BuiltInProfiles
 {
+    private static readonly (string Pattern, string Name)[] VirtualXboxGames =
+    {
+        ("forzahorizon5", "Forza Horizon 5"), ("forzahorizon4", "Forza Horizon 4"),
+        ("forzamotorsport", "Forza Motorsport"), ("forza_steamworks_release_final", "Forza"),
+        ("needforspeedunbound", "Need for Speed Unbound"), ("nfsheat", "Need for Speed Heat"),
+        ("needforspeedpayback", "Need for Speed Payback"), ("needforspeed", "Need for Speed"),
+        ("nfs16", "Need for Speed 2016"), ("nfs14", "Need for Speed Rivals"),
+        ("f1_", "EA Sports F1"), ("easportswrc", "EA Sports WRC"), ("wrc", "EA Sports WRC"),
+        ("gridlegends", "GRID Legends"), ("grid", "GRID"),
+        ("burnoutparadise", "Burnout Paradise"), ("carx", "CarX Street")
+    };
+
     public static bool ApplyWheelDefaults(WheelProfile wheel, IDictionary<string, uint> buttons, IDictionary<string, string> axes, IDictionary<string, long> pedalTravel, IDictionary<string, int> pedalDirection, IDictionary<string, long> steeringTravel)
     {
         if (!wheel.Brand.Equals("Thrustmaster", StringComparison.OrdinalIgnoreCase) || !wheel.Model.Contains("T98", StringComparison.OrdinalIgnoreCase)) return false;
@@ -14,9 +26,6 @@ public static class BuiltInProfiles
             ["GearDown"] = 1, ["GearUp"] = 2, ["Triangle"] = 4, ["Circle"] = 8, ["Square"] = 16, ["Cross"] = 32,
             ["Share"] = 64, ["Options"] = 128, ["R2"] = 256, ["L2"] = 512, ["L3"] = 1024, ["R3"] = 2048, ["PS"] = 4096
         }) buttons[binding.Key] = binding.Value;
-        axes["Accelerator"] = "Y"; axes["Brake"] = "Z";
-        pedalTravel["Accelerator"] = 65535; pedalTravel["Brake"] = 65535;
-        pedalDirection["Accelerator"] = -1; pedalDirection["Brake"] = -1;
         steeringTravel["SteerLeft"] = 27669; steeringTravel["SteerRight"] = 26495;
         return true;
     }
@@ -24,10 +33,20 @@ public static class BuiltInProfiles
     public static GameControllerProfile? FindGameProfile(string executable)
     {
         var game = Path.GetFileNameWithoutExtension(executable);
-        if (game.Contains("carx", StringComparison.OrdinalIgnoreCase))
-            return new GameControllerProfile("CarX Street", 1, "Virtual Xbox controller: steering, pedals, paddles, face buttons and D-pad are ready for gameplay.");
-        if (game.Contains("assettocorsa", StringComparison.OrdinalIgnoreCase) || game.Contains("iracing", StringComparison.OrdinalIgnoreCase) || game.Contains("rFactor", StringComparison.OrdinalIgnoreCase) || game.Contains("beamng", StringComparison.OrdinalIgnoreCase) || game.Contains("wrc", StringComparison.OrdinalIgnoreCase) || game.Contains("f1_", StringComparison.OrdinalIgnoreCase))
-            return new GameControllerProfile(game, 0, "Native wheel/HID profile: the game can use the wheel directly, including vendor force feedback where supported.");
+        if (game.Equals("speed", StringComparison.OrdinalIgnoreCase) || game.Equals("speed2", StringComparison.OrdinalIgnoreCase) ||
+            game.Equals("nfsmw", StringComparison.OrdinalIgnoreCase) || game.Equals("nfsc", StringComparison.OrdinalIgnoreCase))
+            return new GameControllerProfile("Classic Need for Speed", 1,
+                "Compatibility Xbox profile: calibrated wheel input is exposed through XInput.");
+        var match = VirtualXboxGames.FirstOrDefault(entry => game.Contains(entry.Pattern, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(match.Pattern))
+            return new GameControllerProfile(match.Name, 1,
+                "Compatibility Xbox profile: Wheel Pro exposes calibrated steering and pedals as XInput before the game starts.");
+
+        if (game.Contains("assettocorsa", StringComparison.OrdinalIgnoreCase) || game.Contains("iracing", StringComparison.OrdinalIgnoreCase) ||
+            game.Contains("rfactor", StringComparison.OrdinalIgnoreCase) || game.Contains("beamng", StringComparison.OrdinalIgnoreCase))
+            return new GameControllerProfile(game, 0, "Native wheel/HID profile for a game with direct wheel support.");
         return null;
     }
+
+    public static bool IsSupportedGameExecutable(string executable) => FindGameProfile(executable) is not null;
 }

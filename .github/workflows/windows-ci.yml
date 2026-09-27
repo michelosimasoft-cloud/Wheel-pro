@@ -1,0 +1,33 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        run: dotnet restore tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj --configfile NuGet.Config
+      - name: Build
+        run: dotnet build tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj -c Release --no-restore
+      - name: Run regression tests
+        run: dotnet run --project tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj -c Release --no-build
+      - name: Publish self-contained Windows build
+        run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained --no-restore -o artifacts/publish
+      - name: Verify portable payload
+        shell: pwsh
+        run: |
+          $required = @('WheelPro.exe', 'WheelPro.dll', 'WheelPro.runtimeconfig.json', 'coreclr.dll')
+          foreach ($file in $required) {
+            if (-not (Test-Path (Join-Path 'artifacts/publish' $file))) {
+              throw "Missing distribution file: $file"
+            }
+          }

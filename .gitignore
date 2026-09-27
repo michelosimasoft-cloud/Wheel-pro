@@ -3,15 +3,22 @@
 [Oo]bj/
 artifacts/
 .tools/
+.packages/
+.release-tools/
 .dotnet-cli/
+.dotnet-home/
 .nuget-packages/
 WheelPro/publish/
+Release/
+WheelPro-win-Setup.exe
 
 # Local test captures and machine-specific files
 video-review-*/
 *.wav
 *.jpg
 *.mp4
+*.pfx
+*.snk
 dotnet-sdk-*.exe
 .vs/
 .vscode/

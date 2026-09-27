@@ -1,0 +1,35 @@
+<Window x:Class="WheelPro.FirstRunSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Wheel Pro setup" Height="560" Width="720" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" Background="#F4F6FA" Foreground="#172033">
+  <Grid Margin="24">
+    <Border Background="White" BorderBrush="#E0E6F0" BorderThickness="1" CornerRadius="20" Padding="26">
+      <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel>
+          <TextBlock Text="FIRST-RUN DEVICE SETUP" Foreground="#2463EB" FontWeight="Bold" FontSize="11"/>
+          <TextBlock Text="Connect Wheel Pro to this PC" FontSize="26" FontWeight="SemiBold" Margin="0,9,0,4"/>
+          <TextBlock Text="This check does not change Windows. Driver installation starts only when you approve it." Foreground="#697589" TextWrapping="Wrap"/>
+        </StackPanel>
+        <StackPanel Grid.Row="1" Margin="0,22,0,10">
+          <Border Background="#F8FAFD" BorderBrush="#D9E0EB" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+            <StackPanel><TextBlock Text="PHYSICAL WHEEL" FontWeight="Bold" FontSize="11"/><TextBlock x:Name="WheelStatus" TextWrapping="Wrap" Margin="0,8,0,0"/></StackPanel>
+          </Border>
+          <Border Background="#F8FAFD" BorderBrush="#D9E0EB" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,0,0,12">
+            <StackPanel><TextBlock Text="VIRTUAL CONTROLLER" FontWeight="Bold" FontSize="11"/><TextBlock x:Name="VirtualDriverStatus" TextWrapping="Wrap" Margin="0,8,0,0"/></StackPanel>
+          </Border>
+          <TextBlock x:Name="Recommendation" Foreground="#24589B" TextWrapping="Wrap" Margin="2,2,2,12"/>
+          <ProgressBar x:Name="DownloadProgress" Height="5" IsIndeterminate="True" Visibility="Collapsed"/>
+          <TextBlock x:Name="ActionStatus" Foreground="#697589" FontSize="12" TextWrapping="Wrap" Margin="2,8,2,0"/>
+        </StackPanel>
+        <DockPanel Grid.Row="2" LastChildFill="False">
+          <Button Content="Continue" DockPanel.Dock="Right" Padding="18,9" Margin="6,0,0,0" Background="#2F70F5" Foreground="White" Click="Continue_Click"/>
+          <Button x:Name="InstallButton" Content="Install virtual-controller support" DockPanel.Dock="Right" Padding="14,9" Margin="6,0,0,0" Click="Install_Click"/>
+          <Button Content="Scan again" DockPanel.Dock="Right" Padding="14,9" Margin="6,0,0,0" Click="Scan_Click"/>
+          <Button x:Name="VendorButton" Content="Open wheel driver page" DockPanel.Dock="Right" Padding="14,9" Click="Vendor_Click" IsEnabled="False"/>
+        </DockPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>
