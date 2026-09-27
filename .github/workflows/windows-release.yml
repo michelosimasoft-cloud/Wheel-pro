@@ -4,12 +4,14 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths: [".github/release-request"]
 
 jobs:
   package:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -28,3 +30,15 @@ jobs:
           name: WheelPro-windows
           path: artifacts/releases/*
           if-no-files-found: error
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = ([xml](Get-Content WheelPro/WheelPro.csproj)).Project.PropertyGroup.Version
+          $tag = "v$version"
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag artifacts/releases/* --clobber
+          } else {
+            gh release create $tag artifacts/releases/* --target $env:GITHUB_SHA --title "Wheel Pro $version" --generate-notes
+          }
