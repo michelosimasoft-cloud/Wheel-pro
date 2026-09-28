@@ -4,13 +4,13 @@ Wheel Pro is a self-contained Windows desktop application for detecting racing w
 
 ## Download
 
-Download `WheelPro-win-Setup.exe` from the latest GitHub Release. The setup includes the application and its .NET runtime.
+Download `WheelPro-win-Setup.exe` from the latest GitHub Release. The setup includes Wheel Pro, the .NET 10 runtime, and the Windows Desktop runtime. Users do not need to install .NET separately.
 
 The virtual-controller driver is downloaded from its official release only when requested in the application, then Windows asks for permission before installation. Vendor wheel drivers remain owned and signed by their respective manufacturers.
 
 ## Build from source
 
-Requires the .NET 8 SDK on Windows:
+Requires the .NET 10 SDK on Windows:
 
 ```powershell
 dotnet build WheelPro\WheelPro.csproj -c Release
@@ -21,7 +21,7 @@ dotnet run --project WheelPro\WheelPro.csproj
 
 Wheel Pro is currently a Windows WPF application. It supports known wheel profiles and a Generic HID profile for unlisted Windows game controllers. Game output can be native wheel/HID, virtual Xbox, or virtual PlayStation controller mode.
 
-The distributed `win-x64` build is self-contained, so target PCs do not need to install .NET separately. Supported systems and the automated test matrix are documented in [COMPATIBILITY.md](COMPATIBILITY.md). Physical wheel detection, vendor-driver behaviour, force feedback, and virtual-controller output still require validation on each supported wheel/driver combination.
+The distributed `win-x64` installer and portable ZIP are self-contained. They bundle the .NET 10 and Windows Desktop runtimes, so target PCs do not need to install .NET separately. Supported systems and the automated test matrix are documented in [COMPATIBILITY.md](COMPATIBILITY.md). Physical wheel detection, vendor-driver behaviour, force feedback, and virtual-controller output still require validation on each supported wheel/driver combination.
 
 ## Validation
 

@@ -4,10 +4,9 @@
 
 - Windows 10 version 2004 (build 19041) or newer, x64
 - Windows 11, x64
-- Self-contained installer or portable build (no separate .NET installation required)
-- Framework-dependent build with the .NET 8 Desktop Runtime
+- Self-contained installer or portable build with bundled .NET 10 and Windows Desktop runtimes (no separate .NET installation required)
 
-GitHub Actions validates every change on clean Windows Server 2022 and Windows Server 2025 runners, using both self-contained and framework-dependent deployment modes. The matrix restores dependencies, runs the regression suite, publishes the application, checks all required runtime files, validates assembly metadata, and confirms that the executable contains the application icon.
+GitHub Actions validates every change on clean Windows Server 2022 and Windows Server 2025 runners using the production self-contained deployment mode. The matrix restores dependencies, runs the regression suite, publishes the application, checks the bundled .NET 10 and Windows Desktop runtimes, validates assembly metadata, and confirms that the executable contains the application icon.
 
 ## Hardware validation boundary
 

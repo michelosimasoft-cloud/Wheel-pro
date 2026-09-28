@@ -22,6 +22,17 @@ if (-not $selfContained -and (Test-Path (Join-Path $publish "coreclr.dll"))) {
     throw "Framework-dependent payload unexpectedly contains the .NET runtime."
 }
 
+if ($selfContained) {
+    $runtimeConfig = Get-Content (Join-Path $publish "WheelPro.runtimeconfig.json") -Raw | ConvertFrom-Json
+    $frameworks = @($runtimeConfig.runtimeOptions.includedFrameworks)
+    foreach ($framework in @("Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App")) {
+        $bundled = $frameworks | Where-Object { $_.name -eq $framework }
+        if ($null -eq $bundled -or -not $bundled.version.StartsWith("10.")) {
+            throw "The self-contained payload does not bundle the .NET 10 $framework runtime."
+        }
+    }
+}
+
 $assembly = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $publish "WheelPro.dll"))
 if ($assembly.Version.Major -ne 1 -or $assembly.Version.Minor -ne 5) {
     throw "Unexpected Wheel Pro assembly version: $($assembly.Version)"

@@ -13,13 +13,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
-        deployment: [self-contained, framework-dependent]
+        deployment: [self-contained]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
       - name: Restore and build tests
         run: dotnet restore tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj --configfile NuGet.Config
       - name: Run regression tests
@@ -27,9 +27,6 @@ jobs:
       - name: Publish self-contained payload
         if: matrix.deployment == 'self-contained'
         run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained -o artifacts/publish
-      - name: Publish framework-dependent payload
-        if: matrix.deployment == 'framework-dependent'
-        run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained false -o artifacts/publish
       - name: Validate distribution
         shell: pwsh
         run: ./scripts/test-distribution.ps1 -PublishDirectory artifacts/publish -Deployment ${{ matrix.deployment }}
