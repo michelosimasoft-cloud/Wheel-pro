@@ -21,7 +21,7 @@ jobs:
       - name: Run regression tests
         run: dotnet run --project tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj -c Release --no-build
       - name: Publish self-contained Windows build
-        run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained --no-restore -o artifacts/publish
+        run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained -o artifacts/publish
       - name: Verify portable payload
         shell: pwsh
         run: |

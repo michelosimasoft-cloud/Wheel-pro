@@ -16,7 +16,8 @@ $dotnet = (Get-Command dotnet -ErrorAction Stop).Source
 $vpk = (Get-Command vpk -ErrorAction Stop).Source
 $version = ([xml](Get-Content $project)).Project.PropertyGroup.Version
 
-& $dotnet restore $project --configfile (Join-Path $repoRoot "NuGet.Config")
+& $dotnet restore $project -r $Runtime --configfile (Join-Path $repoRoot "NuGet.Config")
+if ($LASTEXITCODE) { throw "dotnet restore failed with exit code $LASTEXITCODE" }
 & $dotnet publish $project -c $Configuration -r $Runtime --self-contained -o $publish --no-restore
 if ($LASTEXITCODE) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
