@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $repoRoot "WheelPro\WheelPro.csproj"
+$icon = Join-Path $repoRoot "WheelPro\Assets\WheelPro.ico"
 $artifacts = Join-Path $repoRoot "artifacts"
 $publish = Join-Path $artifacts "publish"
 $releases = Join-Path $artifacts "releases"
@@ -30,7 +31,7 @@ function Sign-File([string]$Path) {
 
 Sign-File (Join-Path $publish "WheelPro.exe")
 New-Item -ItemType Directory -Force -Path $releases | Out-Null
-& $vpk pack --packId WheelPro --packVersion $version --packDir $publish --mainExe WheelPro.exe --outputDir $releases
+& $vpk pack --packId WheelPro --packVersion $version --packDir $publish --mainExe WheelPro.exe --icon $icon --outputDir $releases
 if ($LASTEXITCODE) { throw "Velopack failed with exit code $LASTEXITCODE" }
 Get-ChildItem $releases -Filter *.exe | ForEach-Object { Sign-File $_.FullName }
 Get-ChildItem $releases -File | Get-FileHash -Algorithm SHA256 | ForEach-Object {
