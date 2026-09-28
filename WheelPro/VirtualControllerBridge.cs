@@ -29,11 +29,13 @@ public sealed class VirtualControllerBridge : IDisposable
         if (type == VirtualControllerType.Xbox360)
         {
             xboxController = client.CreateXbox360Controller();
+            xboxController.AutoSubmitReport = false;
             xboxController.Connect();
         }
         else
         {
             dualShockController = client.CreateDualShock4Controller();
+            dualShockController.AutoSubmitReport = false;
             dualShockController.Connect();
         }
         ControllerType = type;
@@ -69,6 +71,7 @@ public sealed class VirtualControllerBridge : IDisposable
         xboxController.SetButtonState(Xbox360Button.Guide, false);
         xboxController.SetButtonState(Xbox360Button.Up, dpadActionMode && PovMatches(pov, 0)); xboxController.SetButtonState(Xbox360Button.Right, dpadActionMode && PovMatches(pov, 9000));
         xboxController.SetButtonState(Xbox360Button.Down, dpadActionMode && PovMatches(pov, 18000)); xboxController.SetButtonState(Xbox360Button.Left, dpadActionMode && PovMatches(pov, 27000));
+        xboxController.SubmitReport();
 
         void Set(Xbox360Button button, string control) => xboxController.SetButtonState(button, buttons.TryGetValue(control, out var pressed) && pressed);
     }
@@ -85,6 +88,7 @@ public sealed class VirtualControllerBridge : IDisposable
         Set(DualShock4Button.ShoulderLeft, "GearDown"); Set(DualShock4Button.ShoulderRight, "GearUp");
         Set(DualShock4Button.ThumbLeft, "L3"); Set(DualShock4Button.ThumbRight, "R3"); Set(DualShock4Button.Share, "Share"); Set(DualShock4Button.Options, "Options");
         controller.SetDPadDirection(!dpadActionMode || pov == 65535 ? DualShock4DPadDirection.None : PovMatches(pov, 0) ? DualShock4DPadDirection.North : PovMatches(pov, 9000) ? DualShock4DPadDirection.East : PovMatches(pov, 18000) ? DualShock4DPadDirection.South : DualShock4DPadDirection.West);
+        controller.SubmitReport();
         void Set(DualShock4Button button, string control) => controller.SetButtonState(button, buttons.TryGetValue(control, out var pressed) && pressed);
     }
 

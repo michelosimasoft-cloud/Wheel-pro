@@ -2,7 +2,7 @@ using System.IO;
 
 namespace WheelPro;
 
-public sealed record GameControllerProfile(string Name, int OutputMode, string Description);
+public sealed record GameControllerProfile(string Name, int OutputMode, string Description, double SteeringGain = 1);
 
 public static class BuiltInProfiles
 {
@@ -36,11 +36,20 @@ public static class BuiltInProfiles
         if (game.Equals("speed", StringComparison.OrdinalIgnoreCase) || game.Equals("speed2", StringComparison.OrdinalIgnoreCase) ||
             game.Equals("nfsmw", StringComparison.OrdinalIgnoreCase) || game.Equals("nfsc", StringComparison.OrdinalIgnoreCase))
             return new GameControllerProfile("Classic Need for Speed", 1,
-                "Compatibility Xbox profile: calibrated wheel input is exposed through XInput.");
+                "Compatibility Xbox profile: calibrated wheel input is exposed through XInput.", 1.25);
         var match = VirtualXboxGames.FirstOrDefault(entry => game.Contains(entry.Pattern, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(match.Pattern))
+        {
+            var gain = match.Name switch
+            {
+                "Need for Speed" or "Need for Speed Unbound" or "Need for Speed Heat" or "Need for Speed Payback" or "Need for Speed 2016" or "Need for Speed Rivals" => 1.2,
+                "Forza Horizon 5" or "Forza Horizon 4" or "Forza Motorsport" or "Forza" => 1.1,
+                "GRID Legends" or "GRID" or "CarX Street" or "Burnout Paradise" => 1.15,
+                _ => 1.05
+            };
             return new GameControllerProfile(match.Name, 1,
-                "Compatibility Xbox profile: Wheel Pro exposes calibrated steering and pedals as XInput before the game starts.");
+                "Compatibility Xbox profile: Wheel Pro exposes calibrated steering and pedals as XInput before the game starts.", gain);
+        }
 
         if (game.Contains("assettocorsa", StringComparison.OrdinalIgnoreCase) || game.Contains("iracing", StringComparison.OrdinalIgnoreCase) ||
             game.Contains("rfactor", StringComparison.OrdinalIgnoreCase) || game.Contains("beamng", StringComparison.OrdinalIgnoreCase))

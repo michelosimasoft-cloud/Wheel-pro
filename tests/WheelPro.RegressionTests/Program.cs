@@ -51,6 +51,10 @@ Assert(BuiltInProfiles.FindGameProfile("NeedForSpeedHeat.exe")?.OutputMode == 1,
     "Need for Speed Heat must select XInput output.");
 Assert(BuiltInProfiles.FindGameProfile("speed.exe")?.OutputMode == 1,
     "Classic Need for Speed executables must select XInput output.");
+Assert(BuiltInProfiles.FindGameProfile("NeedForSpeedHeat.exe")?.SteeringGain == 1.2,
+    "Need for Speed must receive its responsive game-specific steering gain.");
+Assert(BuiltInProfiles.FindGameProfile("ForzaHorizon5.exe")?.SteeringGain == 1.1,
+    "Forza must receive a conservative game-specific steering gain.");
 
 Assert(Math.Abs(SteeringResponse.DirectLinear(5000, 10000) - .5) < .000001,
     "Half calibrated steering travel must produce exactly half Xbox-stick travel.");
@@ -60,6 +64,8 @@ Assert(Math.Abs(SteeringResponse.DirectLinear(2500, 10000, 1.2) - .3) < .000001,
     "Sensitivity must remain a linear gain and must not introduce a response curve.");
 Assert(Math.Abs(SteeringResponse.ApplyLinearGain(.25, 1.2) - .3) < .000001,
     "Normalized Xbox steering gain must remain directly proportional.");
+Assert(SteeringResponse.ApplyLinearGain(.9, 1.2) == 1,
+    "Responsive steering gain must clamp cleanly at full controller travel.");
 
 var mappedButtons = new Dictionary<string, uint> { ["Triangle"] = 4, ["Square"] = 8 };
 ButtonMapping.AssignUnique(mappedButtons, "Square", 4);

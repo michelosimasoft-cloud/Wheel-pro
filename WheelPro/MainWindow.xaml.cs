@@ -30,7 +30,8 @@ public partial class MainWindow : Window
     private static readonly HttpClient SearchClient = new();
     private CancellationTokenSource? searchCancellation;
     private ConnectedWheel? scannedWheel;
-    private readonly DispatcherTimer inputTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    private readonly DispatcherTimer inputTimer = new(DispatcherPriority.Send) { Interval = TimeSpan.FromMilliseconds(4) };
+    private DateTime nextLiveVisualUpdateUtc;
     private int joystickDeviceId = -1;
     private WheelInputState? inputBaseline;
     private DateTime inputReadyAtUtc;
@@ -609,13 +610,19 @@ public partial class MainWindow : Window
         var accelerator = pedalsConfirmed ? GetMappedAxisPressure("Accelerator", "Y", state, baseline) : 0;
         var brake = pedalsConfirmed ? GetMappedAxisPressure("Brake", "Z", state, baseline) : 0;
         var clutch = NormalizePressure(state.R, state.RMin, state.RMax, baseline.R);
+        CaptureMappingInput(state);
+        SubmitVirtualController(state, steering, accelerator, brake);
+
+        // Keep the game-facing path at 250 Hz. Visual work is limited to 30 Hz
+        // so WPF layout and rendering never delay the virtual-controller report.
+        var now = DateTime.UtcNow;
+        if (now < nextLiveVisualUpdateUtc) return;
+        nextLiveVisualUpdateUtc = now.AddMilliseconds(33);
         var activity = $"Live input — {state.DeviceName}: steering {steering:+0.00;-0.00;0.00}, accelerator {accelerator:P0}, brake {brake:P0}; buttons: {state.PressedButtons}";
 
         StudioStatus.Text = pedalsConfirmed ? activity : "Pedals are held at 0% until their first calibration is confirmed. Choose Map pedals to record released and full travel.";
         CalibrationMonitorStatus.Text = calibrationLearningStore.Observe(selectedProfile, state, baseline);
         UpdateLiveInputTiles(state, physicalSteering, accelerator, brake, clutch);
-        CaptureMappingInput(state);
-        SubmitVirtualController(state, steering, accelerator, brake);
     }
 
     private void UpdateLiveInputTiles(WheelInputState state, double steering, double accelerator, double brake, double clutch)
@@ -781,8 +788,14 @@ public partial class MainWindow : Window
             : normalized * GetWheelHalfRotation();
     }
 
-    private double ApplySteeringSensitivity(double steering) =>
-        SteeringResponse.ApplyLinearGain(steering, SensitivitySlider?.Value ?? 1);
+    private double ApplySteeringSensitivity(double steering)
+    {
+        var userGain = SensitivitySlider?.Value ?? 1.15;
+        var gameGain = string.IsNullOrWhiteSpace(selectedGameExecutable)
+            ? 1
+            : BuiltInProfiles.FindGameProfile(selectedGameExecutable)?.SteeringGain ?? 1;
+        return SteeringResponse.ApplyLinearGain(steering, userGain * gameGain);
+    }
 
     private double GetWheelHalfRotation()
     {
