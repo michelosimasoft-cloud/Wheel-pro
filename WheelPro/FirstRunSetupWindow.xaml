@@ -1,7 +1,7 @@
 <Window x:Class="WheelPro.FirstRunSetupWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Wheel Pro setup" Height="560" Width="720" WindowStartupLocation="CenterOwner"
+        Title="Wheel Pro setup" Icon="/Assets/WheelPro.ico" Height="560" Width="720" WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize" Background="#F4F6FA" Foreground="#172033">
   <Grid Margin="24">
     <Border Background="White" BorderBrush="#E0E6F0" BorderThickness="1" CornerRadius="20" Padding="26">
