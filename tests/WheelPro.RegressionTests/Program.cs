@@ -5,6 +5,9 @@ static void Assert(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+Assert(UpdateService.DefaultUpdateFeed == "https://github.com/michelosimasoft-cloud/Wheel-pro/releases/latest/download/",
+    "Installed builds must use the public GitHub Releases feed by default.");
+
 var hardwareId = @"HID\VID_044F&PID_B697\7&18575677&0&0000";
 var profile = WheelCatalog.FindByHardwareId(hardwareId);
 Assert(profile is not null, "The T98 hardware ID must resolve to a known profile.");

@@ -2,15 +2,17 @@
 
 Wheel Pro uses Velopack for Windows installers, background downloads, and the refresh-to-install prompt.
 
-## Configure the live update feed
+## Automatic updates
 
-Create `%LOCALAPPDATA%\WheelPro\update-source.json` on the installed machine:
+Installed builds check the public Wheel Pro GitHub Release feed when the main window opens. When a newer version exists, the user is notified and chooses whether to download, install, and restart. Updates are never installed silently.
+
+The built-in feed is `https://github.com/michelosimasoft-cloud/Wheel-pro/releases/latest/download/`. To use a mirror or test feed, create `%LOCALAPPDATA%\WheelPro\update-source.json` on the installed machine:
 
 ```json
 { "UpdateSource": "https://your-domain.example/wheelpro/releases" }
 ```
 
-The URL must host the Velopack release assets, including `releases.win-x64.json` and the generated `.nupkg` files. A GitHub Releases repository can also be used after its URL is configured through a GitHub-specific update source in a production deployment.
+The URL must host the Velopack release assets, including `releases.win.json` and the generated `.nupkg` files.
 
 ## Publish a new release
 

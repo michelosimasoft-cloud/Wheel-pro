@@ -205,8 +205,8 @@ public partial class MainWindow : Window
             var update = await updateService.CheckForUpdateAsync();
             if (update is null) return;
             var choice = MessageBox.Show(
-                "A new Wheel Pro update is ready. Click Yes to refresh and install it now.",
-                "Update ready", MessageBoxButton.YesNo, MessageBoxImage.Information);
+                "A new Wheel Pro update is available. Select Yes to download it, close Wheel Pro, install the update, and restart automatically. Select No to keep using this version.",
+                "Wheel Pro update available", MessageBoxButton.YesNo, MessageBoxImage.Information);
             if (choice == MessageBoxResult.Yes)
                 await updateService.DownloadAndRestartAsync(update);
         }
