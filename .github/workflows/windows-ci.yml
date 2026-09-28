@@ -1,4 +1,4 @@
-name: Windows CI
+name: Windows compatibility
 
 on:
   push:
@@ -8,26 +8,28 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    name: ${{ matrix.os }} / ${{ matrix.deployment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+        deployment: [self-contained, framework-dependent]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Restore
+      - name: Restore and build tests
         run: dotnet restore tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj --configfile NuGet.Config
-      - name: Build
-        run: dotnet build tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj -c Release --no-restore
       - name: Run regression tests
-        run: dotnet run --project tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj -c Release --no-build
-      - name: Publish self-contained Windows build
+        run: dotnet run --project tests/WheelPro.RegressionTests/WheelPro.RegressionTests.csproj -c Release --no-restore
+      - name: Publish self-contained payload
+        if: matrix.deployment == 'self-contained'
         run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained -o artifacts/publish
-      - name: Verify portable payload
+      - name: Publish framework-dependent payload
+        if: matrix.deployment == 'framework-dependent'
+        run: dotnet publish WheelPro/WheelPro.csproj -c Release -r win-x64 --self-contained false -o artifacts/publish
+      - name: Validate distribution
         shell: pwsh
-        run: |
-          $required = @('WheelPro.exe', 'WheelPro.dll', 'WheelPro.runtimeconfig.json', 'coreclr.dll')
-          foreach ($file in $required) {
-            if (-not (Test-Path (Join-Path 'artifacts/publish' $file))) {
-              throw "Missing distribution file: $file"
-            }
-          }
+        run: ./scripts/test-distribution.ps1 -PublishDirectory artifacts/publish -Deployment ${{ matrix.deployment }}
